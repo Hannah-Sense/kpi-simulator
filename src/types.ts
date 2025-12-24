@@ -50,9 +50,9 @@ export interface PackageAllocation {
 }
 
 // 온보딩 비용
-export interface OnboardingCost {
+export type OnboardingCost = {
   [key in StoreRange]: number;
-}
+};
 
 // 월별 계약/매출 정보
 export interface MonthlyContract {

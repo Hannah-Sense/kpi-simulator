@@ -144,7 +144,7 @@ export const simulateMonthlyRevenueByPackage = (
   // 패키지별로 출시월 그룹핑 (어느 월에 어떤 패키지가 출시되는지)
   const launchByMonth = new Map<Month, PackageType[]>();
   PACKAGE_TYPES.forEach((pkgName) => {
-    const launchMonth = PACKAGE_AVAILABILITY[pkgName] ?? 1;
+    const launchMonth = (PACKAGE_AVAILABILITY[pkgName] ?? 1) as Month;
     if (!launchByMonth.has(launchMonth)) {
       launchByMonth.set(launchMonth, []);
     }
