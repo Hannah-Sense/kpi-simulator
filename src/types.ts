@@ -7,6 +7,21 @@ export type PackageType = '베이직' | '프로1' | '프로2' | '프로3' | '프
 // 분기
 export type Quarter = 'Q1' | 'Q2' | 'Q3' | 'Q4';
 
+// 월
+export type Month =
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12;
+
 // 브랜드 규모별 정보
 export interface BrandDistribution {
   range: StoreRange;
@@ -39,14 +54,14 @@ export interface OnboardingCost {
   [key in StoreRange]: number;
 }
 
-// 분기별 계약 정보
-export interface QuarterlyContract {
-  quarter: Quarter;
+// 월별 계약/매출 정보
+export interface MonthlyContract {
+  month: Month;
   newBrands: number;
   cumulativeBrands: number;
   subscriptionRevenue: number;
-  revenue: number;
   onboardingRevenue: number;
+  revenue: number; // subscription + onboarding
 }
 
 // 시뮬레이션 결과
@@ -54,7 +69,7 @@ export interface SimulationResult {
   totalRevenue: number;
   subscriptionRevenue: number;
   onboardingRevenue: number;
-  quarterlyBreakdown: QuarterlyContract[];
+  monthlyBreakdown: MonthlyContract[];
   packageBreakdown: {
     package: PackageType;
     brands: number;

@@ -8,6 +8,7 @@ interface SimulatorFormProps {
   onOnboardingCostChange: (costs: OnboardingCost) => void;
   includeOnboarding: boolean;
   onIncludeOnboardingChange: (include: boolean) => void;
+  allocatedBrands?: number;
 }
 
 export const SimulatorForm: React.FC<SimulatorFormProps> = ({
@@ -17,6 +18,7 @@ export const SimulatorForm: React.FC<SimulatorFormProps> = ({
   onOnboardingCostChange,
   includeOnboarding,
   onIncludeOnboardingChange,
+  allocatedBrands,
 }) => {
   const handleBrandCountChange = (range: StoreRange, value: string) => {
     const count = parseInt(value.replace(/,/g, '') || '0');
@@ -57,7 +59,13 @@ export const SimulatorForm: React.FC<SimulatorFormProps> = ({
       <h2 className="card-title">📊 브랜드 분포 설정</h2>
 
       <div className="alert alert-info">
-        <strong>총 {totalBrands.toLocaleString()}개 브랜드</strong> | {totalStores.toLocaleString()}개 매장
+        <strong>총 {totalBrands.toLocaleString()}개 브랜드(분포)</strong> | {totalStores.toLocaleString()}개 매장(분포)
+        {typeof allocatedBrands === 'number' ? (
+          <>
+            <br />
+            <strong>패키지 배분 브랜드:</strong> {allocatedBrands.toLocaleString()}개
+          </>
+        ) : null}
       </div>
 
       <div className="grid-5">

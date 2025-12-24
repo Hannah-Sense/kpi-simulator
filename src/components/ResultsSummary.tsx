@@ -77,37 +77,37 @@ export const ResultsSummary: React.FC<ResultsSummaryProps> = ({
       </div>
 
       <h3 style={{ fontSize: '18px', marginTop: '32px', marginBottom: '16px' }}>
-        📅 분기별 매출
+        📅 월별 매출
       </h3>
       <div className="table-container">
         <table>
           <thead>
             <tr>
-              <th>분기</th>
+              <th>월</th>
               <th className="text-right">신규 브랜드 (개)</th>
               <th className="text-right">누적 브랜드 (개)</th>
               <th className="text-right">구독 매출 (원)</th>
               <th className="text-right">온보딩 매출 (원)</th>
-              <th className="text-right">분기 총 매출 (원)</th>
+              <th className="text-right">월 총 매출 (원)</th>
             </tr>
           </thead>
           <tbody>
-            {result.quarterlyBreakdown.map((q) => {
+            {result.monthlyBreakdown.map((m) => {
               return (
-                <tr key={q.quarter}>
+                <tr key={m.month}>
                   <td>
-                    <span className="badge badge-info">{q.quarter}</span>
+                    <span className="badge badge-info">{m.month}월</span>
                   </td>
-                  <td className="text-right">{q.newBrands.toLocaleString()}개</td>
-                  <td className="text-right">{q.cumulativeBrands.toLocaleString()}개</td>
+                  <td className="text-right">{m.newBrands.toLocaleString()}개</td>
+                  <td className="text-right">{m.cumulativeBrands.toLocaleString()}개</td>
                   <td className="text-right">
-                    {formatNumber(q.subscriptionRevenue)}원
-                  </td>
-                  <td className="text-right">
-                    {formatNumber(q.onboardingRevenue)}원
+                    {formatNumber(m.subscriptionRevenue)}원
                   </td>
                   <td className="text-right">
-                    <strong>{formatNumber(q.revenue)}원</strong>
+                    {formatNumber(m.onboardingRevenue)}원
+                  </td>
+                  <td className="text-right">
+                    <strong>{formatNumber(m.revenue)}원</strong>
                   </td>
                 </tr>
               );
@@ -120,34 +120,34 @@ export const ResultsSummary: React.FC<ResultsSummaryProps> = ({
               </td>
               <td className="text-right" style={{ padding: '14px 16px', borderTop: '2px solid #e5e7eb' }}>
                 <strong>
-                  {result.quarterlyBreakdown
-                    .reduce((sum, q) => sum + q.newBrands, 0)
+                  {result.monthlyBreakdown
+                    .reduce((sum, m) => sum + m.newBrands, 0)
                     .toLocaleString()}개
                 </strong>
               </td>
               <td className="text-right" style={{ padding: '14px 16px', borderTop: '2px solid #e5e7eb' }}>
                 <strong>
-                  {result.quarterlyBreakdown[result.quarterlyBreakdown.length - 1]?.cumulativeBrands.toLocaleString() || 0}개
+                  {result.monthlyBreakdown[result.monthlyBreakdown.length - 1]?.cumulativeBrands.toLocaleString() || 0}개
                 </strong>
               </td>
               <td className="text-right" style={{ padding: '14px 16px', borderTop: '2px solid #e5e7eb' }}>
                 <strong>
                   {formatNumber(
-                    result.quarterlyBreakdown.reduce((sum, q) => sum + q.subscriptionRevenue, 0)
+                    result.monthlyBreakdown.reduce((sum, m) => sum + m.subscriptionRevenue, 0)
                   )}원
                 </strong>
               </td>
               <td className="text-right" style={{ padding: '14px 16px', borderTop: '2px solid #e5e7eb' }}>
                 <strong>
                   {formatNumber(
-                    result.quarterlyBreakdown.reduce((sum, q) => sum + q.onboardingRevenue, 0)
+                    result.monthlyBreakdown.reduce((sum, m) => sum + m.onboardingRevenue, 0)
                   )}원
                 </strong>
               </td>
               <td className="text-right" style={{ padding: '14px 16px', borderTop: '2px solid #e5e7eb' }}>
                 <strong>
                   {formatNumber(
-                    result.quarterlyBreakdown.reduce((sum, q) => sum + q.revenue, 0)
+                    result.monthlyBreakdown.reduce((sum, m) => sum + m.revenue, 0)
                   )}원
                 </strong>
               </td>

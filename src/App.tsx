@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BrandDistribution,
   Package,
@@ -33,6 +33,9 @@ function App() {
     useState<OnboardingCost>(BASE_ONBOARDING_COST);
   const [includeOnboarding, setIncludeOnboarding] = useState(true);
   const [targetRevenue] = useState(1000000000); // 10억원
+  const [saveMessage, setSaveMessage] = useState<string>('');
+
+  const STORAGE_KEY = 'frandy-kpi-simulator-state-v1';
 
   // 패키지별 브랜드 배분 초기화
   const initializeAllocations = (): PackageAllocation[] => {
@@ -63,9 +66,7 @@ function App() {
     });
   };
 
-  const [allocations, setAllocations] = useState<PackageAllocation[]>(
-    initializeAllocations()
-  );
+  const [allocations, setAllocations] = useState<PackageAllocation[]>(initializeAllocations());
 
   const rebalanceAllocations = () => {
     // 각 매장 규모(range)별로 "총 배분 브랜드 수"가 brandDistribution의 count와 정확히 일치하도록 재배분
@@ -116,10 +117,8 @@ function App() {
     setAllocations(base);
   };
 
-  // 브랜드 분포 변경 시 allocation 재조정
-  React.useEffect(() => {
-    setAllocations(initializeAllocations());
-  }, [brandDistribution]);
+  // (중요) 브랜드 분포 변경 시 allocation을 자동으로 덮어쓰지 않습니다.
+  // 사용자가 패키지 배분을 세팅해둔 값을 유지하고, 필요할 때만 "배분 자동 맞춤" 버튼으로 조정합니다.
 
   const handlePriceChange = (
     packageName: string,
@@ -141,6 +140,102 @@ function App() {
     );
   };
 
+  const allocatedBrands = useMemo(
+    () => allocations.reduce((sum, a) => sum + Object.values(a.distribution).reduce((s, c) => s + c, 0), 0),
+    [allocations]
+  );
+
+  // 자동 불러오기 제거 - 사용자가 명시적으로 불러오기 버튼을 눌러야 함
+
+  // 자동 저장 제거 - 수동 저장만 사용
+
+  // 저장 슬롯 관리
+  const [currentSlot, setCurrentSlot] = useState<number>(1);
+  const [savedSlots, setSavedSlots] = useState<Record<number, { timestamp: string; name: string }>>({});
+
+  const getSlotKey = (slot: number) => `frandy-kpi-slot-${slot}`;
+
+  // 저장된 슬롯 목록 불러오기
+  useEffect(() => {
+    const slots: Record<number, { timestamp: string; name: string }> = {};
+    for (let i = 1; i <= 5; i++) {
+      const slotKey = getSlotKey(i);
+      const saved = localStorage.getItem(slotKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          slots[i] = {
+            timestamp: parsed.timestamp || '알 수 없음',
+            name: parsed.name || `슬롯 ${i}`,
+          };
+        } catch {
+          // ignore
+        }
+      }
+    }
+    setSavedSlots(slots);
+  }, []);
+
+  // 현재 설정을 슬롯에 저장
+  const handleSaveToSlot = (slot: number, customName?: string) => {
+    try {
+      const timestamp = new Date().toLocaleString('ko-KR');
+      const slotData = {
+        timestamp,
+        name: customName || `슬롯 ${slot}`,
+        brandDistribution,
+        packages,
+        onboardingCosts,
+        includeOnboarding,
+        allocations,
+      };
+      localStorage.setItem(getSlotKey(slot), JSON.stringify(slotData));
+      
+      setSavedSlots(prev => ({
+        ...prev,
+        [slot]: { timestamp, name: customName || `슬롯 ${slot}` },
+      }));
+      
+      setCurrentSlot(slot);
+      setSaveMessage(`✅ ${customName || `슬롯 ${slot}`}에 저장 완료!`);
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      setSaveMessage('❌ 저장 실패');
+      setTimeout(() => setSaveMessage(''), 3000);
+    }
+  };
+
+  // 슬롯에서 불러오기
+  const handleLoadFromSlot = (slot: number) => {
+    try {
+      const saved = localStorage.getItem(getSlotKey(slot));
+      if (!saved) {
+        setSaveMessage(`❌ 슬롯 ${slot}에 저장된 데이터가 없습니다`);
+        setTimeout(() => setSaveMessage(''), 3000);
+        return;
+      }
+
+      const parsed = JSON.parse(saved);
+      if (parsed?.brandDistribution) setBrandDistribution(parsed.brandDistribution);
+      if (parsed?.packages) setPackages(parsed.packages);
+      if (parsed?.onboardingCosts) setOnboardingCosts(parsed.onboardingCosts);
+      if (typeof parsed?.includeOnboarding === 'boolean') setIncludeOnboarding(parsed.includeOnboarding);
+      if (parsed?.allocations) setAllocations(parsed.allocations);
+
+      setCurrentSlot(slot);
+      setSaveMessage(`✅ ${parsed.name || `슬롯 ${slot}`} 불러오기 완료!`);
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      setSaveMessage('❌ 불러오기 실패');
+      setTimeout(() => setSaveMessage(''), 3000);
+    }
+  };
+
+  // 빠른 저장 (현재 슬롯에)
+  const handleQuickSave = () => {
+    handleSaveToSlot(currentSlot);
+  };
+
   // 시뮬레이션 실행
   const simulationResult = runSimulation(
     packages,
@@ -153,11 +248,123 @@ function App() {
   return (
     <div className="app-container">
       <div className="header">
-        <h1>🚀 프랜디 2026 KPI 시뮬레이터</h1>
-        <p>
-          브랜드 분포, 패키지 구성, 가격 전략을 조정하여 목표 매출 달성 시나리오를
-          시뮬레이션하세요.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px' }}>
+          <div>
+            <h1>🚀 프랜디 2026 KPI 시뮬레이터</h1>
+            <p>
+              브랜드 분포, 패키지 구성, 가격 전략을 조정하여 목표 매출 달성 시나리오를
+              시뮬레이션하세요.
+            </p>
+          </div>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '10px',
+            padding: '15px',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '12px',
+            minWidth: '350px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <strong style={{ fontSize: '14px', color: '#495057' }}>💾 저장 관리</strong>
+              {saveMessage && (
+                <span style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  backgroundColor: saveMessage.includes('완료') ? '#d4edda' : '#f8d7da',
+                  color: saveMessage.includes('완료') ? '#155724' : '#721c24',
+                  borderRadius: '6px',
+                }}>
+                  {saveMessage}
+                </span>
+              )}
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[1, 2, 3, 4, 5].map(slot => (
+                <div key={slot} style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '4px',
+                  padding: '8px',
+                  backgroundColor: currentSlot === slot ? '#e3f2fd' : 'white',
+                  borderRadius: '8px',
+                  border: currentSlot === slot ? '2px solid #2196F3' : '1px solid #dee2e6',
+                  flex: '1 1 calc(33% - 8px)',
+                  minWidth: '100px'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#6c757d', fontWeight: 'bold' }}>
+                    슬롯 {slot} {currentSlot === slot && '(현재)'}
+                  </div>
+                  {savedSlots[slot] && (
+                    <div style={{ fontSize: '10px', color: '#868e96' }}>
+                      {new Date(savedSlots[slot].timestamp).toLocaleString('ko-KR', { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      onClick={() => handleSaveToSlot(slot)}
+                      style={{
+                        flex: 1,
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        backgroundColor: '#4CAF50',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      저장
+                    </button>
+                    {savedSlots[slot] && (
+                      <button
+                        onClick={() => handleLoadFromSlot(slot)}
+                        style={{
+                          flex: 1,
+                          padding: '6px 8px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          backgroundColor: '#2196F3',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        불러오기
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <button 
+              onClick={handleQuickSave}
+              style={{
+                padding: '10px 16px',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                backgroundColor: '#FF9800',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              }}
+            >
+              ⚡ 빠른 저장 (슬롯 {currentSlot})
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="tabs">
@@ -185,6 +392,7 @@ function App() {
               onOnboardingCostChange={setOnboardingCosts}
               includeOnboarding={includeOnboarding}
               onIncludeOnboardingChange={setIncludeOnboarding}
+              allocatedBrands={allocatedBrands}
             />
 
             <PackageConfig

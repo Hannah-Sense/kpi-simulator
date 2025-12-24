@@ -4,12 +4,12 @@ import {
   PackageAllocation,
   OnboardingCost,
   SimulationResult,
-  QuarterlyContract,
   StoreRange,
   PackageType,
-  Quarter,
+  Month,
+  MonthlyContract,
 } from '../types';
-import { QUARTERLY_BRAND_INFLUX, PACKAGE_AVAILABILITY } from '../constants';
+import { MONTHLY_BRAND_INFLUX, PACKAGE_AVAILABILITY } from '../constants';
 
 // 매장당 가격 계산
 export const calculatePricePerStore = (
@@ -45,73 +45,188 @@ export const calculatePackageMonthlyRevenue = (
   return total;
 };
 
-// 분기별 계약 시뮬레이션
-export const simulateQuarterlyContracts = (
+const allocateByWeights = (
+  total: number,
+  weights: number[]
+): number[] => {
+  if (weights.length === 0) return [];
+  if (total <= 0) return weights.map(() => 0);
+  const sumW = weights.reduce((s, w) => s + w, 0);
+  if (sumW <= 0) {
+    // 균등 분배
+    const base = Math.floor(total / weights.length);
+    let rem = total - base * weights.length;
+    return weights.map((_, i) => base + (rem-- > 0 ? 1 : 0));
+  }
+
+  const raws = weights.map((w) => (total * w) / sumW);
+  const floors = raws.map((r) => Math.floor(r));
+  const fracs = raws.map((r, i) => ({ i, frac: r - floors[i] })).filter(f => f.frac > 0);
+  const floorSum = floors.reduce((s, v) => s + v, 0);
+  let rem = total - floorSum;
+  
+  if (fracs.length === 0) {
+    // 모든 값이 정수로 떨어짐, 남은 값 균등 분배
+    let idx = 0;
+    while (rem > 0) {
+      floors[idx % floors.length] += 1;
+      idx += 1;
+      rem -= 1;
+    }
+  } else {
+    fracs.sort((a, b) => b.frac - a.frac);
+    let idx = 0;
+    while (rem > 0) {
+      floors[fracs[idx % fracs.length].i] += 1;
+      idx += 1;
+      rem -= 1;
+    }
+  }
+  return floors;
+};
+
+type RangeCounts = Record<StoreRange, number>;
+type PkgRangeCounts = Record<PackageType, RangeCounts>;
+
+const STORE_RANGES: StoreRange[] = ['1-50', '51-100', '101-200', '201-400', '400+'];
+const PACKAGE_TYPES: PackageType[] = ['베이직', '프로1', '프로2', '프로3', '프리미엄'];
+
+const emptyRangeCounts = (): RangeCounts => ({
+  '1-50': 0,
+  '51-100': 0,
+  '101-200': 0,
+  '201-400': 0,
+  '400+': 0,
+});
+
+const initPkgRangeCounts = (): PkgRangeCounts => ({
+  베이직: emptyRangeCounts(),
+  프로1: emptyRangeCounts(),
+  프로2: emptyRangeCounts(),
+  프로3: emptyRangeCounts(),
+  프리미엄: emptyRangeCounts(),
+});
+
+/**
+ * 월별 매출 시뮬레이션 (패키지 출시월 기준)
+ *
+ * - 각 패키지에 배정된 브랜드는 해당 패키지 출시월(PACKAGE_AVAILABILITY)에 즉시 전부 활성화
+ * - 예: 베이직(1월 출시) 4개 → 1월에 4개 즉시 활성화
+ *       프로1(3월 출시) 10개 → 3월에 10개 즉시 활성화
+ * - 월 구독 매출 = Σ(활성화된 패키지별 브랜드 수 × 월 가격)
+ * - 월 온보딩 매출 = Σ(해당 월 신규 활성화 브랜드 수 × 매장규모별 온보딩 비용)
+ */
+export const simulateMonthlyRevenueByPackage = (
   totalBrands: number,
   packages: Package[],
   allocations: PackageAllocation[],
   brandDistribution: BrandDistribution[],
   onboardingCosts: OnboardingCost,
   includeOnboarding: boolean
-): QuarterlyContract[] => {
-  const quarters: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
-  const results: QuarterlyContract[] = [];
-  let cumulativeBrands = 0;
+): {
+  monthlyBreakdown: MonthlyContract[];
+  annualSubscriptionByPackage: Record<PackageType, number>;
+  annualSubscriptionByRange: Record<StoreRange, number>;
+} => {
+  const months: Month[] = [1,2,3,4,5,6,7,8,9,10,11,12];
 
-  quarters.forEach((quarter, idx) => {
-    const quarterMonth = (idx + 1) * 3; // Q1=3, Q2=6, Q3=9, Q4=12
-    const influxRate = QUARTERLY_BRAND_INFLUX[quarter];
-    const newBrands = Math.round(totalBrands * influxRate);
-    cumulativeBrands += newBrands;
+  const pkgByName = new Map<PackageType, Package>();
+  packages.forEach((p) => pkgByName.set(p.name, p));
 
-    // 해당 분기에 사용 가능한 패키지 필터링
-    const availablePackages = packages.filter(
-      (pkg) => PACKAGE_AVAILABILITY[pkg.name] <= quarterMonth
-    );
-
-    // 분기 구독 매출 계산 (누적 브랜드 기준, 월간 * 3개월)
-    let subscriptionRevenue = 0;
-    allocations.forEach((allocation) => {
-      const pkg = availablePackages.find((p) => p.name === allocation.package);
-      if (pkg) {
-        const monthlyRev = calculatePackageMonthlyRevenue(
-          pkg,
-          allocation,
-          brandDistribution
-        );
-        // 해당 분기의 평균 브랜드 수를 고려 (분기 시작 + 분기 끝) / 2
-        const avgBrandsInQuarter = cumulativeBrands - newBrands / 2;
-        const proportion = avgBrandsInQuarter / totalBrands;
-        subscriptionRevenue += monthlyRev * 3 * proportion;
-      }
-    });
-
-    // 온보딩 매출 (신규 브랜드만, 실제 배분된 비율로 계산)
-    let onboardingRevenue = 0;
-    if (includeOnboarding && newBrands > 0) {
-      brandDistribution.forEach((dist) => {
-        // 해당 구간에 실제 배분된 브랜드 수
-        const allocatedInRange = allocations.reduce((sum, alloc) => {
-          return sum + alloc.distribution[dist.range];
-        }, 0);
-        
-        // 비율 계산
-        const brandsInRange = Math.round((allocatedInRange / totalBrands) * newBrands);
-        onboardingRevenue += brandsInRange * onboardingCosts[dist.range];
-      });
-    }
-
-    results.push({
-      quarter,
-      newBrands,
-      cumulativeBrands,
-      subscriptionRevenue,
-      revenue: subscriptionRevenue + onboardingRevenue,
-      onboardingRevenue,
+  // 패키지별 × 매장규모별 배정 브랜드 수
+  const packageAllocations: PkgRangeCounts = initPkgRangeCounts();
+  allocations.forEach((a) => {
+    STORE_RANGES.forEach((r) => {
+      packageAllocations[a.package][r] = a.distribution[r] ?? 0;
     });
   });
 
-  return results;
+  // 패키지별로 출시월 그룹핑 (어느 월에 어떤 패키지가 출시되는지)
+  const launchByMonth = new Map<Month, PackageType[]>();
+  PACKAGE_TYPES.forEach((pkgName) => {
+    const launchMonth = PACKAGE_AVAILABILITY[pkgName] ?? 1;
+    if (!launchByMonth.has(launchMonth)) {
+      launchByMonth.set(launchMonth, []);
+    }
+    launchByMonth.get(launchMonth)!.push(pkgName);
+  });
+
+  const annualSubscriptionByPackage: Record<PackageType, number> = {
+    베이직: 0,
+    프로1: 0,
+    프로2: 0,
+    프로3: 0,
+    프리미엄: 0,
+  };
+  const annualSubscriptionByRange: Record<StoreRange, number> = {
+    '1-50': 0,
+    '51-100': 0,
+    '101-200': 0,
+    '201-400': 0,
+    '400+': 0,
+  };
+
+  // 활성화된 브랜드 추적 (월별로 누적)
+  const active: PkgRangeCounts = initPkgRangeCounts();
+
+  const monthlyBreakdown: MonthlyContract[] = [];
+  let cumulativeBrands = 0;
+
+  months.forEach((month) => {
+    // 이번 달에 출시되는 패키지들의 브랜드를 즉시 활성화
+    const launchingPackages = launchByMonth.get(month) ?? [];
+    let onboardingRevenue = 0;
+    let newBrandsThisMonth = 0;
+
+    launchingPackages.forEach((pkgName) => {
+      STORE_RANGES.forEach((range) => {
+        const brandCount = packageAllocations[pkgName][range];
+        if (brandCount > 0) {
+          active[pkgName][range] = brandCount;
+          newBrandsThisMonth += brandCount;
+          if (includeOnboarding) {
+            onboardingRevenue += brandCount * onboardingCosts[range];
+          }
+        }
+      });
+    });
+
+    cumulativeBrands += newBrandsThisMonth;
+
+    // 이번 달 구독 매출 계산 (출시된 모든 패키지의 활성 브랜드)
+    let subscriptionRevenue = 0;
+    PACKAGE_TYPES.forEach((pkgName) => {
+      const pkg = pkgByName.get(pkgName);
+      if (!pkg) return;
+
+      // 아직 출시 안 된 패키지는 스킵
+      const launchMonth = PACKAGE_AVAILABILITY[pkgName] ?? 1;
+      if (launchMonth > month) return;
+
+      let pkgMonthly = 0;
+      STORE_RANGES.forEach((range) => {
+        const cnt = active[pkgName][range];
+        if (cnt <= 0) return;
+        const rev = cnt * (pkg.pricing[range] ?? 0);
+        pkgMonthly += rev;
+        annualSubscriptionByRange[range] += rev;
+      });
+
+      subscriptionRevenue += pkgMonthly;
+      annualSubscriptionByPackage[pkgName] += pkgMonthly;
+    });
+
+    monthlyBreakdown.push({
+      month,
+      newBrands: newBrandsThisMonth,
+      cumulativeBrands,
+      subscriptionRevenue,
+      onboardingRevenue,
+      revenue: subscriptionRevenue + onboardingRevenue,
+    });
+  });
+
+  return { monthlyBreakdown, annualSubscriptionByPackage, annualSubscriptionByRange };
 };
 
 // 전체 시뮬레이션 실행
@@ -127,15 +242,16 @@ export const runSimulation = (
     return sum + Object.values(alloc.distribution).reduce((s, count) => s + count, 0);
   }, 0);
 
-  // 분기별 계약
-  const quarterlyBreakdown = simulateQuarterlyContracts(
-    totalBrands,
-    packages,
-    allocations,
-    brandDistribution,
-    onboardingCosts,
-    includeOnboarding
-  );
+  // 월별 계약/매출 (패키지 출시월 반영)
+  const { monthlyBreakdown, annualSubscriptionByPackage, annualSubscriptionByRange } =
+    simulateMonthlyRevenueByPackage(
+      totalBrands,
+      packages,
+      allocations,
+      brandDistribution,
+      onboardingCosts,
+      includeOnboarding
+    );
 
   // (참고용) 패키지별 월 매출(연말 풀-도입 가정)
   const packageBreakdown = allocations.map((allocation) => {
@@ -159,69 +275,15 @@ export const runSimulation = (
       brands,
       stores,
       monthlyRevenue,
-      // annualRevenue는 아래에서 "실현 기준(분기 합)"으로 덮어씁니다.
-      annualRevenue: 0,
+      annualRevenue: annualSubscriptionByPackage[allocation.package] ?? 0,
     };
-  });
-
-  // "실현 기준" 연간 구독/온보딩/총 매출: 분기 합으로 통일
-  const realizedSubscriptionRevenue = quarterlyBreakdown.reduce(
-    (sum, q) => sum + q.subscriptionRevenue,
-    0
-  );
-  const realizedOnboardingRevenue = includeOnboarding
-    ? quarterlyBreakdown.reduce((sum, q) => sum + q.onboardingRevenue, 0)
-    : 0;
-  const realizedTotalRevenue = quarterlyBreakdown.reduce((sum, q) => sum + q.revenue, 0);
-
-  // 패키지별 "실현 연매출" 계산 (분기별 가용 패키지 + 브랜드 유입 비율 반영)
-  // 분기별 proportion 로직은 simulateQuarterlyContracts와 동일하게 맞춥니다.
-  const quarters: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
-  let cumBrands = 0;
-  const quarterMeta = quarters.map((q, idx) => {
-    const influxRate = QUARTERLY_BRAND_INFLUX[q];
-    const newBrands = Math.round(totalBrands * influxRate);
-    cumBrands += newBrands;
-    const avgBrandsInQuarter = cumBrands - newBrands / 2;
-    const proportion = totalBrands > 0 ? avgBrandsInQuarter / totalBrands : 0;
-    const quarterMonth = (idx + 1) * 3;
-    return { q, proportion, quarterMonth };
-  });
-
-  const pkgAnnualRealizedMap = new Map<PackageType, number>();
-  allocations.forEach((allocation) => {
-    const pkg = packages.find((p) => p.name === allocation.package)!;
-    const monthlyRevFull = calculatePackageMonthlyRevenue(pkg, allocation, brandDistribution);
-    const annualRealized = quarterMeta.reduce((sum, meta) => {
-      if (PACKAGE_AVAILABILITY[pkg.name] > meta.quarterMonth) return sum; // 분기 내 미출시
-      return sum + monthlyRevFull * 3 * meta.proportion;
-    }, 0);
-    pkgAnnualRealizedMap.set(pkg.name, annualRealized);
-  });
-
-  // packageBreakdown에 annualRevenue(실현 기준) 주입
-  packageBreakdown.forEach((p) => {
-    p.annualRevenue = pkgAnnualRealizedMap.get(p.package) ?? 0;
   });
 
   // 매장 규모별 분석도 "실현 기준"으로 통일
   const storeRangeBreakdown = brandDistribution.map((dist) => {
     const brandsInRange = allocations.reduce((sum, alloc) => sum + alloc.distribution[dist.range], 0);
     const stores = brandsInRange * dist.avgStores;
-
-    const revenue = allocations.reduce((sum, allocation) => {
-      const pkg = packages.find((p) => p.name === allocation.package)!;
-      const brandCount = allocation.distribution[dist.range];
-      if (brandCount <= 0) return sum;
-
-      const monthlyRevForRange = pkg.pricing[dist.range] * brandCount;
-      const annualRealizedForRange = quarterMeta.reduce((acc, meta) => {
-        if (PACKAGE_AVAILABILITY[pkg.name] > meta.quarterMonth) return acc;
-        return acc + monthlyRevForRange * 3 * meta.proportion;
-      }, 0);
-
-      return sum + annualRealizedForRange;
-    }, 0);
+    const revenue = annualSubscriptionByRange[dist.range] ?? 0;
 
     return {
       range: dist.range,
@@ -231,11 +293,18 @@ export const runSimulation = (
     };
   });
 
+  // "실현 기준" 연간 구독/온보딩/총 매출: 월 합
+  const realizedSubscriptionRevenue = monthlyBreakdown.reduce((sum, m) => sum + m.subscriptionRevenue, 0);
+  const realizedOnboardingRevenue = includeOnboarding
+    ? monthlyBreakdown.reduce((sum, m) => sum + m.onboardingRevenue, 0)
+    : 0;
+  const realizedTotalRevenue = monthlyBreakdown.reduce((sum, m) => sum + m.revenue, 0);
+
   return {
     totalRevenue: realizedTotalRevenue,
     subscriptionRevenue: realizedSubscriptionRevenue,
     onboardingRevenue: realizedOnboardingRevenue,
-    quarterlyBreakdown,
+    monthlyBreakdown,
     packageBreakdown,
     storeRangeBreakdown,
   };
