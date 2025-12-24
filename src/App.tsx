@@ -31,7 +31,7 @@ function App() {
   const [packages, setPackages] = useState<Package[]>(BASE_PACKAGES);
   const [onboardingCosts, setOnboardingCosts] =
     useState<OnboardingCost>(BASE_ONBOARDING_COST);
-  const [includeOnboarding, setIncludeOnboarding] = useState(true);
+  const [includeOnboarding, setIncludeOnboarding] = useState(false); // 기본값 false
   const [targetRevenue] = useState(1000000000); // 10억원
   const [saveMessage, setSaveMessage] = useState<string>('');
 
